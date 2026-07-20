@@ -4,6 +4,9 @@ package com.example.remotecompose
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.RectF
 import android.util.Log
 import androidx.compose.remote.player.core.platform.BitmapLoader
 import coil3.BitmapImage
@@ -57,16 +60,31 @@ open class CoilBitmapLoader(
 
     final override fun loadBitmap(name: String): InputStream {
         val resolved = resolveName(name)
+        val slot = parseSlotSize(resolved)
         val key = memoryCacheKeyFor(resolved)
         val image = imageLoader.memoryCache?.get(key)?.image
-        val bytes = image?.let(::encodeImage)
+        val bytes = image?.let { encodeImage(it, slot) }
         if (bytes != null) {
             logTransition(resolved, LogState.Hit, bytes.size, name)
             return ByteArrayInputStream(bytes)
         }
         logTransition(resolved, LogState.Miss, 0, name)
-        warmUpAsync(resolved, key)
+        // Fetch without the fragment (it's a slot-size annotation, not part of the resource),
+        // but cache under the full name so distinct slot sizes don't collide.
+        warmUpAsync(resolved.substringBefore('#'), key)
         return ByteArrayInputStream(EMPTY)
+    }
+
+    /**
+     * Slot dims the document declared for this URL, carried as a `#rc-size=WxH` fragment by the
+     * server's UrlBitmapSupport. The player requires the delivered bitmap to match the declared
+     * slot exactly (larger throws in RemoteBitmapDecoder.checkBounds, smaller renders shrunken),
+     * so when the fragment is present the encoded bitmap is letterboxed to exactly these dims.
+     */
+    private fun parseSlotSize(name: String): Pair<Int, Int>? {
+        val match = SLOT_FRAGMENT.find(name) ?: return null
+        val (w, h) = match.destructured
+        return w.toInt() to h.toInt()
     }
 
     private fun logTransition(resolved: String, state: LogState, bytes: Int, originalName: String) {
@@ -88,7 +106,7 @@ open class CoilBitmapLoader(
 
     protected open fun memoryCacheKeyFor(name: String): MemoryCache.Key = MemoryCache.Key(name)
 
-    protected open fun encodeImage(image: Image): ByteArray? {
+    protected open fun encodeImage(image: Image, slot: Pair<Int, Int>? = null): ByteArray? {
         if (image !is BitmapImage) return null
         val source = image.bitmap
         val software =
@@ -97,12 +115,34 @@ open class CoilBitmapLoader(
             } else {
                 source
             }
-        val encodable = downscaleToFit(software)
+        val encodable = if (slot != null) letterboxToExact(software, slot.first, slot.second)
+                        else downscaleToFit(software)
         val out = ByteArrayOutputStream(encodable.allocationByteCount.coerceAtLeast(1024))
         encodable.compress(compressFormat, compressQuality, out)
         if (encodable !== software) encodable.recycle()
         if (software !== source) software.recycle()
         return out.toByteArray()
+    }
+
+    /**
+     * Scales (aspect-preserving) and centers the bitmap onto an exactly [w]×[h] transparent
+     * canvas, so the delivered size always equals the slot the document declared.
+     */
+    private fun letterboxToExact(src: Bitmap, w: Int, h: Int): Bitmap {
+        if (src.width == w && src.height == h) return src
+        val out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        val scale = minOf(w.toFloat() / src.width, h.toFloat() / src.height)
+        val dw = src.width * scale
+        val dh = src.height * scale
+        val left = (w - dw) / 2f
+        val top = (h - dh) / 2f
+        Canvas(out).drawBitmap(
+            src,
+            null,
+            RectF(left, top, left + dw, top + dh),
+            Paint(Paint.FILTER_BITMAP_FLAG),
+        )
+        return out
     }
 
     private fun downscaleToFit(bitmap: Bitmap): Bitmap {
@@ -153,5 +193,6 @@ open class CoilBitmapLoader(
         private const val TAG = "CoilBitmapLoader"
         private val EMPTY = ByteArray(0)
         const val DEFAULT_MAX_IMAGE_DIMENSION_PX = 512
+        private val SLOT_FRAGMENT = Regex("#rc-size=(\\d+)x(\\d+)")
     }
 }
