@@ -5,6 +5,7 @@ package com.example.remotecompose
 import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,26 +19,35 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Text
+import androidx.compose.remote.core.CoreDocument
+import androidx.compose.remote.core.operations.NamedVariable
 import androidx.compose.remote.player.core.state.StateUpdater
-import androidx.compose.remote.player.core.state.StateUpdaterImpl
-import androidx.compose.remote.player.core.platform.AndroidRemoteContext
 import androidx.compose.remote.player.view.RemoteComposePlayer
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.example.remotecompose.overlay.OverlayKey
+import com.example.remotecompose.overlay.RcMediaOverlayLayer
+import com.example.remotecompose.overlay.RcPlayerHandle
+import com.example.remotecompose.overlay.USER_PREFIX
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -49,9 +59,11 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.floatOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.put
 import java.util.concurrent.ConcurrentHashMap
 
 private const val TAG = "RC_PAGER"
@@ -84,11 +96,22 @@ private fun pagesKeptAlive(pageCount: Int) = if (pageCount <= KEEP_ALL_UP_TO) (p
  *    pages follow once that page has painted.
  *  - The header fires `setValue {"host.tab": i}`; the host only moves the pager. That is the
  *    only value the host answers: every other state (pills, accordions, the reviews overlay) is
- *    written and read inside its own binary, so nothing is stored or pushed here.
+ *    written and read inside its own binary.
+ *  - A `pin == "overlay"` section is the screen's intro ([PagerIntro]): layered over the pages
+ *    while its Lottie hole plays once, its playback pushed into every binary as host values.
  */
 @Composable
-fun RCFromLocalManifestPager(screen: String) {
+fun RCFromLocalManifestPager(
+    screen: String,
+    /** The opener's facts (deeplink `?args=`): seeded as `USER:args.*` where declared, relayed to POST data links. */
+    args: JsonObject = JsonObject(emptyMap()),
+    /** Results for the opener — here the host result `media_shown{id}` (jar: a Fragment Result). */
+    onResult: (JsonObject) -> Unit = {},
+) {
     val context = LocalContext.current
+    // jar `isGuidingLottieShown`: once the intro has counted as shown, this screen instance never
+    // replays it — not even after a rotation recreates the composition.
+    var introShown by rememberSaveable(screen) { mutableStateOf(false) }
     var manifest by remember(screen) { mutableStateOf<LocalScreenManifest?>(null) }
     var sections by remember(screen) { mutableStateOf<List<LoadedSection>>(emptyList()) }
     var values by remember(screen) { mutableStateOf(SlotValues(emptyMap())) }
@@ -99,7 +122,7 @@ fun RCFromLocalManifestPager(screen: String) {
             .onSuccess { (m, docs, flat) ->
                 manifest = m
                 sections = docs
-                values = flat
+                values = SlotValues(openedValues(m, docs, args, flat.map))
                 Log.d(TAG, "$screen: ${docs.size} sections, tabs=${docs.mapNotNull { it.ref.tab }.distinct()}")
             }
             .onFailure {
@@ -122,6 +145,35 @@ fun RCFromLocalManifestPager(screen: String) {
         )
     }
     val loader = remember { CoilBitmapLoader(context = context, onImageReady = {}) }
+    // Seeded before any player binds, so the header's first frame already waits on the intro.
+    val intro = remember(sections, host) {
+        host.declaredFloats = sections.associate { it.index to declaredFloatNames(it.document) }
+        PagerIntro(sections.firstOrNull { it.ref.isOverlay && it.ref.tab == null }.takeUnless { introShown }).also {
+            host.seedFloats(it.hostFloats())
+            host.tabsLocked = it.isRunning
+        }
+    }
+    LaunchedEffect(intro, host) { snapshotFlow { intro.hostFloats() }.collect { host.pushFloats(it) } }
+    LaunchedEffect(intro, host) { snapshotFlow { intro.isRunning }.collect { host.tabsLocked = it } }
+    LaunchedEffect(intro) { intro.prefetch(context, values.map) }
+    // The header's waiting tabs pulse on the player clock; repaint them every frame while the
+    // intro runs (jar: the chip's infinite transition), not only when a playback value changes.
+    LaunchedEffect(intro, host) {
+        val names = intro.hostFloats().keys
+        while (intro.isRunning) withFrameNanos { host.invalidateReaders(names) }
+    }
+    val header = remember(sections) { sections.filter { it.ref.tab == null && it.ref.isPinnedTop } }
+    val headerPainted by remember(sections, host) {
+        derivedStateOf { header.isNotEmpty() && header.all { (host.heightsDp[it.index] ?: 0f) > 0f } }
+    }
+    LaunchedEffect(intro, host) {
+        val pageSections = sections.filter { it.ref.tab != null }
+        intro.awaitReady(
+            headerPainted = { headerPainted },
+            pagesPainted = { pageSections.all { (host.heightsDp[it.index] ?: 0f) > 0f } },
+        )
+    }
+    LaunchedEffect(intro) { intro.runPageReveal() }
     val density = LocalDensity.current.density
     LaunchedEffect(sections, host) {
         if (sections.isNotEmpty()) measureSectionsLoop(host, sections, density)
@@ -158,10 +210,32 @@ fun RCFromLocalManifestPager(screen: String) {
                 CircularProgressIndicator(color = Color.White)
             }
             else -> {
-                val header = sections.filter { it.ref.tab == null && it.ref.isPinnedTop }
                 val pages = remember(sections) { TabPage.from(sections) }
+                val overlayVisible by remember(intro) { derivedStateOf { intro.isOverlayVisible } }
                 header.forEach { SectionRow(it, values, host, loader) }
-                TabPager(pages, values, host, loader)
+                // jar WithdrawalOptionScreenV2: the pager fades / slides in over the intro Lottie.
+                Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                    // With an intro the hidden pages are built only once the header has painted,
+                    // so the header (and its waiting tabs) shows first.
+                    if (intro.key == null || headerPainted || !intro.isRunning) TabPager(
+                        pages = pages,
+                        values = values,
+                        host = host,
+                        loader = loader,
+                        modifier = Modifier.fillMaxSize().graphicsLayer {
+                            val reveal = intro.pageReveal.value
+                            alpha = reveal
+                            translationY = (1f - reveal) * PagerIntro.PAGE_REVEAL_SLIDE.toPx()
+                        },
+                    )
+                    val overlay = intro.section
+                    if (overlay != null && overlayVisible) {
+                        IntroOverlay(overlay, intro, values, host, loader) { key ->
+                            introShown = true
+                            onResult(mediaShownResult(key))
+                        }
+                    }
+                }
             }
         }
     }
@@ -191,12 +265,42 @@ class TabPage(
     }
 }
 
+/**
+ * The `pin == "overlay"` section over the pages, while the intro plays (jar `WithdrawalIntroLottie`
+ * in its `zIndex(1f)` box): its Lottie hole is floated by [RcMediaOverlayLayer], fades out as the page
+ * reveals, and swallows taps meant for the hidden page underneath.
+ */
+@Composable
+private fun IntroOverlay(
+    section: LoadedSection,
+    intro: PagerIntro,
+    values: SlotValues,
+    host: PagerHostRuntime,
+    loader: CoilBitmapLoader,
+    onShown: (OverlayKey) -> Unit,
+) {
+    SectionFill(
+        section = section,
+        values = values,
+        host = host,
+        loader = loader,
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { alpha = 1f - intro.pageReveal.value }
+            .pointerInput(Unit) { detectTapGestures { } },
+        overlay = { handle ->
+            RcMediaOverlayLayer(handle, values.map, hold = !intro.ready) { key, playback -> intro.onPlayback(key, playback, onShown) }
+        },
+    )
+}
+
 @Composable
 private fun TabPager(
     pages: List<TabPage>,
     values: SlotValues,
     host: PagerHostRuntime,
     loader: CoilBitmapLoader,
+    modifier: Modifier = Modifier,
 ) {
     val pagerState = rememberPagerState(pageCount = { pages.size })
     val keepAlive = pagesKeptAlive(pages.size)
@@ -228,7 +332,7 @@ private fun TabPager(
     }
     HorizontalPager(
         state = pagerState,
-        modifier = Modifier.fillMaxSize(),
+        modifier = modifier,
         beyondViewportPageCount = if (warm) keepAlive else 0,
         // Tap-only for now: swipe would need the host to know where in-binary carousels sit so
         // it can leave those drags alone. Turn on once sections publish their carousel rects.
@@ -253,10 +357,15 @@ private fun TabPager(
 }
 
 /**
- * Host-side runtime for the paging host. It stores NO values: every selection is written inside
- * its binary (`setValue(variable, expression)`), and `{{host.*}}` placeholders in an `apiCall`
- * are read back from the documents' live values. The one named value it answers is
- * `setValue {"host.tab": i}`, which moves the pager.
+ * Host-side runtime for the paging host. Selections inside a page are written inside their
+ * binary (`setValue(variable, expression)`), and `{{host.*}}` placeholders in an `apiCall` are read
+ * back from the documents' live values. The one named value it answers is
+ * `setValue {"host.tab": i}`: pushed back into the header (which draws the selection from it) and
+ * moves the pager — ignored while [tabsLocked] (jar: tabs can't be tapped during the intro).
+ *
+ * The values it owns — `host.tab` and the intro's playback floats ([pushFloats]) — go into every
+ * live player that declares them, and are replayed on every bind because a `setDocument` wipes all
+ * `USER:` values.
  */
 @Stable
 class PagerHostRuntime(
@@ -276,6 +385,45 @@ class PagerHostRuntime(
     private val tabChannel = Channel<Int>(Channel.CONFLATED)
     val tabRequests = tabChannel.receiveAsFlow()
 
+    /** While true, header taps (`host.tab`) are ignored — the intro is playing. */
+    @Volatile var tabsLocked: Boolean = false
+
+    /** Float `USER:` names each section's document declares (bare), so a push only repaints its readers. */
+    @Volatile var declaredFloats: Map<Int, Set<String>> = emptyMap()
+
+    private val hostFloats = ConcurrentHashMap<String, Float>()
+
+    /** Repaints the live players that declare any of [names] (paint only). */
+    fun invalidateReaders(names: Set<String>) {
+        players.forEach { (index, player) ->
+            val declared = declaredFloats[index] ?: return@forEach
+            if (names.any { it in declared }) player.invalidate()
+        }
+    }
+
+    /** Initial host values, before any player binds (they reach each player through [replay]). */
+    fun seedFloats(values: Map<String, Float>) {
+        hostFloats.putAll(values)
+    }
+
+    /**
+     * Pushes host floats into the live players that declare them and repaints only those
+     * (a per-frame intro push must not repaint the pages). Paint-only: no layout is requested.
+     */
+    fun pushFloats(values: Map<String, Float>) {
+        hostFloats.putAll(values)
+        players.forEach { (index, player) ->
+            val declared = declaredFloats[index] ?: return@forEach
+            var touched = false
+            for ((name, v) in values) {
+                if (name !in declared) continue
+                player.stateUpdater.setUserLocalFloat(name, v)
+                touched = true
+            }
+            if (touched) player.invalidate()
+        }
+    }
+
     override fun register(index: Int, player: RemoteComposePlayer) {
         players[index] = player
     }
@@ -285,12 +433,14 @@ class PagerHostRuntime(
     }
 
 
-    /** Nothing to replay: the binaries own their values. */
-    override fun replay(updater: StateUpdater) = Unit
+    /** Re-applies the host floats after a bind (a name the document doesn't declare is a no-op). */
+    override fun replay(updater: StateUpdater) {
+        hostFloats.forEach { (name, v) -> updater.setUserLocalFloat(name, v) }
+    }
 
     /** A `USER:<name>` float from whichever live document declares it (jar: RcNamedValueReader on the tapping document). */
     private fun readDocumentFloat(name: String): Float? = players.values.firstNotNullOfOrNull { player ->
-        val ctx = remoteContextOf(player.stateUpdater) ?: return@firstNotNullOfOrNull null
+        val ctx = RcPlayerHandle.remoteContextOf(player.stateUpdater) ?: return@firstNotNullOfOrNull null
         val id = runCatching { ctx.getVariableId("USER:$name") }.getOrNull()?.takeIf { it > 0 }
             ?: return@firstNotNullOfOrNull null
         runCatching { ctx.getFloat(id) }.getOrNull()?.takeIf { !it.isNaN() }
@@ -304,7 +454,13 @@ class PagerHostRuntime(
                 payload?.forEach { (key, element) ->
                     val v = (element as? JsonPrimitive)?.floatOrNull ?: return@forEach
                     // The tab only moves the pager; any other value is the binary's own.
-                    if (key == TAB_KEY) { tabChannel.trySend(v.toInt()); Log.d(TAG, "tab → page ${v.toInt()}") }
+                    if (key == TAB_KEY) {
+                        if (tabsLocked) { Log.d(TAG, "tab ${v.toInt()} ignored: intro playing"); return@forEach }
+                        // The header shows the selection from `host.tab`: push it (and keep it for
+                        // re-binds), then move the pager.
+                        pushFloats(mapOf(TAB_KEY to v))
+                        tabChannel.trySend(v.toInt()); Log.d(TAG, "tab → page ${v.toInt()}")
+                    }
                     else Log.d(TAG, "setValue $key ignored: binaries own their values")
                 }
                 if (TRACE_ACTIONS) Log.d(TAG, Log.getStackTraceString(Throwable("setValue origin")))
@@ -352,18 +508,34 @@ class PagerHostRuntime(
 
         /** Debug: log the call stack of every setValue to tell a real tap from a replayed action. */
         const val TRACE_ACTIONS = false
-
-        private val contextField by lazy {
-            runCatching { StateUpdaterImpl::class.java.getDeclaredField("mRemoteContext").apply { isAccessible = true } }
-                .onFailure { Log.e(TAG, "StateUpdaterImpl.mRemoteContext not found", it) }
-                .getOrNull()
-        }
-
-        /** The player's variable table, as jar reaches it (no public getter on the stock player). */
-        fun remoteContextOf(stateUpdater: StateUpdater): AndroidRemoteContext? {
-            if (stateUpdater !is StateUpdaterImpl) return null
-            val field = contextField ?: return null
-            return runCatching { field.get(stateUpdater) as? AndroidRemoteContext }.getOrNull()
-        }
     }
+}
+
+/** Bare (`USER:`-less) names of every float slot [document] declares. */
+private fun declaredFloatNames(document: CoreDocument): Set<String> =
+    runCatching { document.getNamedVariables(NamedVariable.FLOAT_TYPE) }
+        .getOrNull().orEmpty().mapTo(HashSet()) { it.removePrefix(USER_PREFIX) }
+
+/**
+ * The screen's data as this opening sees it: each POST data link answered for the opener's [args]
+ * ([MockBackend], the demo's backend), then the declared `args.*` seeded for the documents.
+ */
+private fun openedValues(
+    manifest: LocalScreenManifest,
+    sections: List<LoadedSection>,
+    args: JsonObject,
+    loaded: Map<String, JsonPrimitive>,
+): Map<String, JsonPrimitive> {
+    val answered = sections.flatMap { it.ref.dataEndpoints }.distinctBy { it.key to it.url }
+        .fold(loaded) { values, endpoint -> MockBackend.respond(endpoint, args, values) }
+    val declared = manifest.contract?.receives?.args.orEmpty().mapTo(HashSet()) { it.name }
+    val seeded = args.filterKeys { it in declared }.mapNotNull { (k, v) -> (v as? JsonPrimitive)?.let { "args.$k" to it } }
+    return answered + seeded
+}
+
+/** Host result `media_shown{id}` (non-terminal) for the opener. */
+private fun mediaShownResult(key: OverlayKey): JsonObject = buildJsonObject {
+    put("action", ACTION_MEDIA_SHOWN)
+    put("terminal", "false")
+    put("id", key.id)
 }

@@ -3,6 +3,9 @@
   "options": {
    "data": {
     "title": "Withdraw",
+    "guidingLottie": {
+      "url": "https://raw.githubusercontent.com/airbnb/lottie-android/master/sample/src/main/assets/Lottie%20Logo%202.json"
+    },
     "savings": {
      "label": "Jar Savings",
      "grams": "0.3907g",

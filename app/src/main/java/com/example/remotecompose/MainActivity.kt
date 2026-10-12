@@ -121,7 +121,7 @@ class MainActivity : ComponentActivity() {
                     if (LOCAL_MANIFEST != null) {
                         when (LOCAL_HOST) {
                             LocalHost.STACK -> RCFromLocalManifest(LOCAL_MANIFEST)
-                            LocalHost.PAGER -> RCFromLocalManifestPager(LOCAL_MANIFEST)
+                            LocalHost.PAGER -> RcScreenOpener(LOCAL_MANIFEST)
                         }
                     } else if (JAR_LIKE_HOST) {
                         JarLikeFeedScreen(DEMO_ASSET)

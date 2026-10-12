@@ -53,6 +53,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import com.example.remotecompose.overlay.RcPlayerHandle
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -380,11 +381,13 @@ internal fun SectionFill(
     host: RcSectionHost,
     loader: CoilBitmapLoader,
     modifier: Modifier,
+    /** Composed over the player once it is live, in its coordinates — the overlay holes' native widgets. */
+    overlay: (@Composable (RcPlayerHandle) -> Unit)? = null,
 ) {
     val data = remember(section) { MutableStateFlow<Map<String, JsonPrimitive>>(emptyMap()) }
     val namespaces = remember(section) { section.ref.dataEndpoints.mapNotNull { it.key }.map { "$it." } }
     SideEffect { data.value = values.map.filterKeys { k -> namespaces.any { k.startsWith(it) } } }
-    Box(modifier = modifier) { SectionPlayer(section, data, host, loader, fill = true) }
+    Box(modifier = modifier) { SectionPlayer(section, data, host, loader, fill = true, overlay = overlay) }
 }
 
 @Composable
@@ -425,6 +428,7 @@ private fun SectionPlayer(
     loader: CoilBitmapLoader,
     /** true = the player fills its parent (a viewport-filling page); false = baked canvas cropped by the row. */
     fill: Boolean = false,
+    overlay: (@Composable (RcPlayerHandle) -> Unit)? = null,
 ) {
     val doc = section.document
     val context = LocalContext.current
@@ -493,6 +497,12 @@ private fun SectionPlayer(
         onAction = { _, _ -> },
         onNamedAction = { name, value, _ -> host.onNamedAction(name, value) },
     )
+    // Same box as the player, so hole rects (document coordinates) line up (jar: RcOverlayStack).
+    val live = liveplayer
+    if (overlay != null && live != null) {
+        val handle = remember(live, live.stateUpdater) { RcPlayerHandle(doc, live.stateUpdater) }
+        overlay(handle)
+    }
 }
 
 /** Flattened `USER:` values wrapped so Compose treats them as one immutable input. */

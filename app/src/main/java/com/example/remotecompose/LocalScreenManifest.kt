@@ -19,6 +19,8 @@ data class LocalScreenManifest(
     val minAppVersion: Int = 0,
     val binary: List<LocalBinaryRef>,
     val statusBarColor: String? = null,
+    /** What the screen receives / sends (server `ScreenContract`); only what the demo host acts on. */
+    val contract: LocalContract? = null,
 ) {
     companion object {
         private val json = Json { ignoreUnknownKeys = true }
@@ -53,3 +55,13 @@ data class LocalEndpointRef(
     val method: String = "GET",
     val key: String? = null,
 )
+
+@Serializable
+data class LocalContract(val receives: LocalReceives = LocalReceives())
+
+@Serializable
+data class LocalReceives(val args: List<LocalArgSpec> = emptyList())
+
+/** An opener fact the documents read at `USER:args.<name>`; the host seeds only declared ones. */
+@Serializable
+data class LocalArgSpec(val name: String)
