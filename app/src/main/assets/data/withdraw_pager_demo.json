@@ -1,0 +1,33 @@
+{
+  "endpoints": {
+    "options": {
+      "data": {
+        "title": "Withdraw",
+        "balance": "Jar Savings · ₹12,340"
+      }
+    },
+    "silver": {
+      "data": {
+        "sku": "SLV-HNM-925-01",
+        "product": "₹1,161  ₹1,229  15% off · #1 Bestseller · Men · Pendant. 22K gold plating, easy returns, free home delivery.",
+        "styles": "Divine Pendants: Silver Classic Gada ₹1,499 · Hanuman Gada ₹3,699 · Hanuman Gada (out of stock)",
+        "bestsellers": "Everyday designs loved by Jar users — rings, hoops, pendants from ₹1,499",
+        "cta": { "secondary": "View all 120+ designs", "primary": "Add to Cart" }
+      }
+    },
+    "gold": {
+      "data": {
+        "hero": "24K 999 purity · BIS hallmarked · Live price ₹7,842/gm · Free insured delivery",
+        "grid": "0.5 gm · 1 gm · 2 gm · 5 gm · 10 gm",
+        "cta": { "secondary": "Compare sizes", "primary": "Buy 1 gm coin" }
+      }
+    },
+    "bank": {
+      "data": {
+        "balance": "₹12,340 available · ₹0 locked · Instant UPI payout",
+        "amount": "Min ₹30 · Max ₹50,000 without PAN · Quick picks ₹500 ₹1,000 ₹2,000",
+        "cta": { "secondary": "How it works", "primary": "Proceed to withdraw" }
+      }
+    }
+  }
+}

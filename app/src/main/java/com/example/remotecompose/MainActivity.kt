@@ -44,6 +44,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.remote.core.CoreDocument
+import kotlinx.serialization.json.JsonPrimitive
+import androidx.compose.remote.core.operations.Header
 import androidx.compose.remote.core.CoreDocument.DENSITY_BEHAVIOR_DP
 import androidx.compose.remote.core.Limits
 import androidx.compose.remote.core.RemoteComposeBuffer
@@ -59,6 +61,7 @@ import androidx.compose.remote.creation.compose.modifier.RemoteModifier
 import androidx.compose.remote.creation.compose.modifier.background
 import androidx.compose.remote.creation.compose.modifier.fillMaxSize
 import androidx.compose.remote.creation.compose.state.RemoteColor
+import androidx.compose.remote.creation.compose.state.rs
 import androidx.compose.remote.creation.compose.state.rsp
 import androidx.compose.remote.player.compose.RemoteDocumentPlayer
 import androidx.compose.remote.player.core.platform.BitmapLoader
@@ -97,6 +100,7 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -111,16 +115,23 @@ class MainActivity : ComponentActivity() {
         Log.d("LOOKHERE", "onCreate() called with: savedInstanceState = ${(JarRemoteComposeView(context = this).toString())}")
         setContent {
             RemoteComposeTheme {
-                Scaffold(modifier = Modifier.fillMaxSize()) { innerPadding ->
+                Scaffold(modifier = Modifier.fillMaxSize()) { _ ->
                     // innerPadding is deliberately not applied: rendered binaries paint
                     // edge-to-edge; the list screen insets itself (statusBarsPadding).
-                    Box(
+                    if (LOCAL_MANIFEST != null) {
+                        when (LOCAL_HOST) {
+                            LocalHost.STACK -> RCFromLocalManifest(LOCAL_MANIFEST)
+                            LocalHost.PAGER -> RCFromLocalManifestPager(LOCAL_MANIFEST)
+                        }
+                    } else if (JAR_LIKE_HOST) {
+                        JarLikeFeedScreen(DEMO_ASSET)
+                    } else Box(
                         modifier = Modifier
                             .fillMaxSize()
-                            .background(RcBackground),
+                            .background(if (DEMO_ASSET.contains(".light.")) RcLightBackground else RcBackground),
                         contentAlignment = Alignment.Center
                     ) {
-                        RCFromServer()
+                        RCFromFile(DEMO_ASSET)
                     }
                 }
             }
@@ -151,7 +162,28 @@ fun RCFromServer() {
 }
 
 // Minimal dark palette for the document browser chrome.
+/** The bundled binary the demo renders; `.light.` variants get the light page background. */
+private const val DEMO_ASSET = "nek_home_feed_card.rc"
+
+/** true = host the card like jar's home feed (JarLikeFeed.kt) instead of the centred RCFromFile box. */
+private const val JAR_LIKE_HOST = false
+
+/**
+ * Non-null = render a multi-section screen from `assets/<name>.manifest.json` through the
+ * pinned + `setValue` stack host (SectionStackHost.kt). Written by the server's `--compose <name>`.
+ * Takes precedence over [JAR_LIKE_HOST] / [DEMO_ASSET].
+ */
+private val LOCAL_MANIFEST: String? = "withdraw"
+
+/** STACK = SectionStackHost (collapsing rows, `withdraw_demo`); PAGER = PagerStackHost (`withdraw_pager_demo`). */
+private enum class LocalHost { STACK, PAGER }
+private val LOCAL_HOST = LocalHost.PAGER
+
+/** >0 = call setDocument again every [REBIND_STRESS_PERIOD_MS] this many times after load (see RCFromFile). */
+private const val REBIND_STRESS_TICKS = 0
+private const val REBIND_STRESS_PERIOD_MS = 150L
 private val RcBackground = Color(0xFF0E0F13)
+private val RcLightBackground = Color(0xFFFFFFFF)
 private val RcSurface = Color(0xFF1A1C23)
 private val RcAccent = Color(0xFF8B7CF8)
 private val RcTextPrimary = Color(0xFFF2F3F7)
@@ -399,6 +431,9 @@ private fun DocumentPlayerScreen(name: String, onBack: () -> Unit) {
                     documentWidth = document!!.width,
                     documentHeight = document!!.height,
                     bitmapLoader = loader,
+                    update = { player ->
+                        player.stateUpdater.setUserLocalInt("data.kycVerified", 1)
+                    },
                     onNamedAction = ::handleNamedAction,
                 )
             }
@@ -544,39 +579,113 @@ fun applyScreenData(stateUpdater: StateUpdater, data: ScreenData) {
 }
 
 @Composable
-fun RCFromFile() {
+fun RCFromFile(assetName: String = "nek_home_feed_card.rc") {
     val context = LocalContext.current
     var document by remember { mutableStateOf<CoreDocument?>(null) }
+    // Flattened `USER:` values from `assets/data/<screen>.json` — empty when the asset has no data file.
+    var slotValues by remember { mutableStateOf<Map<String, JsonPrimitive>>(emptyMap()) }
     // One loader instance per screen; it triggers a repaint when an async image arrives.
     var repaintTick by remember { mutableStateOf(0) }
     val loader = remember { CoilBitmapLoader(context = context, onImageReady = { repaintTick++ }) }
-
-    LaunchedEffect(Unit) {
+    val crashMonitor = remember { RcCrashMonitor(assetName) }
+    // `USER:` image slots pushed by name via StateUpdater. Read inside `update`, so an arrival
+    // recomposes and re-pushes after the next setDocument.
+    val slotBitmaps = remember { mutableStateMapOf<String, Bitmap>() }
+    // Re-bind stress: jar's card re-runs the player's `update` (= setDocument, which fully
+    // re-inflates the document) on every recomposition. Read inside `update` below so each tick
+    // forces one more setDocument during the entrance.
+    var rebindTick by remember { mutableStateOf(0) }
+    LaunchedEffect(document) {
+        if (document == null || REBIND_STRESS_TICKS <= 0) return@LaunchedEffect
+        repeat(REBIND_STRESS_TICKS) { delay(REBIND_STRESS_PERIOD_MS); rebindTick++ }
+    }
+    LaunchedEffect(assetName) {
         withContext(Dispatchers.IO) {
-            val bytes = context.assets.open("weather_widget.rc").readBytes()
+            val bytes = context.assets.open(assetName).readBytes()
             val doc = CoreDocument().also {
                 it.initFromBuffer(RemoteComposeBuffer.fromInputStream(bytes.inputStream()))
+                crashMonitor.arm(it)
             }
+            slotValues = FlatScreenData.loadAsset(context, assetName)
             document = doc
         }
     }
-
+    // Resolve the image slots the binary declares: the payload URL by the slot's bare path
+    // (conformed to the declared size), else the profile demo's drawn stand-ins.
+    LaunchedEffect(document, slotValues) {
+        val doc = document ?: return@LaunchedEffect
+        val slots = ProfileSlotBitmaps.imageSlots(doc)
+        Log.d("RC_SLOTS", "image slots declared by $assetName: ${slots.keys}")
+        slots.forEach { (slot, size) ->
+            val (w, h) = size
+            launch {
+                val bitmap = withContext(Dispatchers.IO) {
+                    FlatScreenData.slotUrl(slotValues, slot)?.let { url -> FlatScreenData.loadBitmap(context, url, w, h) }
+                        ?: when {
+                            slot.startsWith(ProfileSlotBitmaps.PROFILE_PIC_PATH) -> ProfileSlotBitmaps.profilePic(context, w, h)
+                            slot.startsWith(ProfileSlotBitmaps.KYC_ICON_PATH) -> ProfileSlotBitmaps.kycTick(w, h)
+                            else -> null
+                        }
+                } ?: return@launch
+                slotBitmaps[slot] = bitmap
+                Log.d("RC_SLOTS", "pushed ${bitmap.width}x${bitmap.height} into '$slot'")
+            }
+        }
+    }
     document?.let { doc ->
-        Log.d("ROHIT", "RCFromFile: document width: ${doc.width}")
-        Log.d("ROHIT", "RCFromFile: document height: ${doc.height}")
-        Log.d("ROHIT", "RCFromFile: document density: ${doc.density}")
-        Log.d("ROHIT", "RCFromFile: document density behaviour: ${doc.densityBehavior}")
+        // A card binary bakes its row height in the header (`rcDocument(heightDp = …)`); the
+        // jar feed sizes the row from that tag, so show it the same way. `CoreDocument.height`
+        // is 0 until first paint — read the tag. A full-screen binary (no meaningful height)
+        // keeps filling the window.
+        val heightDp = doc.featureIntValue(Header.DOC_HEIGHT)
+        val isCard = heightDp in 1..799
+        Log.d("RC_DOC", "$assetName: DOC_WIDTH=${doc.featureIntValue(Header.DOC_WIDTH)} DOC_HEIGHT=$heightDp density=${doc.density}")
         key(repaintTick) {
             RemoteDocumentPlayer(
-                modifier = Modifier.fillMaxSize(),
+                modifier = if (isCard) Modifier.fillMaxWidth().height(heightDp.dp) else Modifier.fillMaxSize(),
                 document = doc,
                 documentWidth = doc.width,
-                documentHeight = doc.height,
+                documentHeight = if (isCard) heightDp else doc.height,
                 bitmapLoader = loader,
+                update = { player ->
+                    rebindTick
+                    val s = player.stateUpdater
+                    // Generic: every slot the document declares, from the asset's data file.
+                    FlatScreenData.apply(doc, s, slotValues)
+                    // The profile asset predates data files and still uses hand-typed values.
+                    if (assetName.startsWith("profile")) applyProfileDemoValues(s)
+                    slotBitmaps.forEach { (slot, bitmap) -> s.setUserLocalBitmap(slot, bitmap) }
+                    crashMonitor.checkAfterFrame(player)
+                },
+                onAction = crashMonitor.onAction,
                 onNamedAction = ::handleNamedAction,
             )
         }
     }
+}
+
+/** Hand-typed demo values for `profile.rc` / `profile.light.rc` (no `data/profile.json` yet). */
+private fun applyProfileDemoValues(s: StateUpdater) {
+    // ── card + rows (strings) ──
+    s.setUserLocalString("user.data.firstName", "Monal")        // name row + card + initials
+    s.setUserLocalString("user.data.phoneNumber", "+91 99999 99999")
+    s.setUserLocalString("user.data.age", "28")
+    s.setUserLocalString("user.data.gender", "Female")
+    s.setUserLocalString("user.data.email", "monal@myjar.app")
+    s.setUserLocalString("primaryUpiId.data.primaryUpiIdInfo.primaryUpiId", "9999999999@ybl")
+    s.setUserLocalString("savedAddresses.data.addresses.count", "2")   // TEXT slot, not int
+    s.setUserLocalString("userVpaAccess.data.cta.title", "Manage UPI ID's")
+    // ── KYC row state machine ──
+    s.setUserLocalInt("user.data.kycVerified", 1)                // 1 = green pill palette + tick + name locked route
+    s.setUserLocalInt("kyc.data.kycStatus.neq.INELIGIBLE", 1)    // 0 = whole KYC row GONE
+    s.setUserLocalInt("kyc.data.kycStatus.neq.VERIFIED", 1)      // 1 = name row opens edit dialog
+    s.setUserLocalInt("kyc.data.statusTag.textData.fontType.count", 1) // 1 = BE pill, 0 = plain text fallback
+    s.setUserLocalString("kyc.data.statusTag.textData.text", "Verified")
+    s.setUserLocalString("kyc.data.title", "Verified")           // fallback-state text (count = 0)
+    s.setUserLocalInt("kyc.data.deeplink.isPresent", 0)
+    // ── row gates ──
+    s.setUserLocalInt("userVpaAccess.data.cta.title.isPresent", 1)      // shows Manage UPI row
+    s.setUserLocalInt("nominee.data.nomineeDetails.fullName.isPresent", 1) // shows Nominee row
 }
 
 /**
@@ -619,12 +728,12 @@ fun handleNamedAction(name: String, value: Any?, stateUpdater: StateUpdater) {
                  ) {
 
                      RemoteText(
-                         text = "Remote Compose Rendered",
+                         text = "Remote Compose Rendered".rs,
                          fontSize = 16.rsp,
                          color = RemoteColor(0xFFFFFFFF.toInt())
                      )
                      RemoteText(
-                         text = "Remote Compose Rendered",
+                         text = "Remote Compose Rendered".rs,
                          fontSize = 16.rsp,
                          color = RemoteColor(0xFFFFFFFF.toInt())
                      )

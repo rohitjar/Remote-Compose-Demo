@@ -13,7 +13,7 @@ android {
 
     defaultConfig {
         applicationId = "com.example.remotecompose"
-        minSdk = 23
+        minSdk = 24
         targetSdk = 37
         versionCode = 1
         versionName = "1.0"
@@ -62,12 +62,14 @@ dependencies {
     androidTestImplementation(libs.androidx.junit)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
     debugImplementation(libs.androidx.compose.ui.tooling)
-    implementation("androidx.compose.remote:remote-core:1.0.0-alpha13")
-    implementation("androidx.compose.remote:remote-creation-compose:1.0.0-alpha13")
-    implementation("androidx.compose.remote:remote-player-compose:1.0.0-alpha13")
-    implementation("androidx.compose.remote:remote-player-core:1.0.0-alpha13")
-    implementation("androidx.compose.remote:remote-player-view:1.0.0-alpha13")
+    implementation("androidx.compose.remote:remote-core:1.0.0-alpha21")
+    implementation("androidx.compose.remote:remote-creation-compose:1.0.0-alpha21")
+    implementation("androidx.compose.remote:remote-player-compose:1.0.0-alpha21")
+    implementation("androidx.compose.remote:remote-player-core:1.0.0-alpha21")
+    implementation("androidx.compose.remote:remote-player-view:1.0.0-alpha21")
     implementation("com.github.bumptech.glide:glide:4.14.2")
+    // Lottie: rasterises vector animations frame-by-frame for the USER: slot demo (RCLottieFromFile).
+    implementation("com.airbnb.android:lottie:6.4.0")
     // Coil for the non-blocking RemoteCompose BitmapLoader (memory-cache lookup + async warm-up).
     implementation("io.coil-kt.coil3:coil:3.0.4")
     implementation("io.coil-kt.coil3:coil-network-okhttp:3.0.4")

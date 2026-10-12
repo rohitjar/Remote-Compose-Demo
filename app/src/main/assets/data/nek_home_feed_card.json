@@ -1,0 +1,167 @@
+{
+  "_comment": "Demo data for nek_home_feed_card.rc. Real staging response of GET /v2/api/features/homeFeed?featureSection=NEK (2026-09-22) under its manifest key `nek`; products 2 and 3 are reconstructed from product 1 where the capture was truncated.",
+  "endpoints": {
+    "nek": {
+      "success": true,
+      "view": [
+        {
+          "cardType": "HOMEFEED_PRODUCT_CAROUSEL_TYPE_ONE",
+          "order": 5,
+          "showCard": true,
+          "cardSection": "NEK",
+          "featureType": "NEK",
+          "header": {
+            "textList": [
+              {
+                "text": "Explore",
+                "textColor": "#2893A1",
+                "textSize": 24,
+                "fontType": [
+                  "BOLD"
+                ],
+                "separator": " ",
+                "fontFamily": "FRANK_RUHL",
+                "textGradientColor": [
+                  "#CCB0F1F9",
+                  "#2893A1"
+                ]
+              },
+              {
+                "text": "NEK",
+                "textColor": "#F4C430",
+                "textSize": 24,
+                "fontType": [
+                  "BOLD"
+                ],
+                "fontFamily": "FRANK_RUHL",
+                "textGradientColor": [
+                  "#F4C430",
+                  "#F4C430"
+                ]
+              }
+            ],
+            "icon": "https://cdn.myjar.app/Homefeed/v2/ui-cards/nek_header_icon.webp"
+          },
+          "subHeader": {
+            "textList": [
+              {
+                "text": "24KT Gold Coins | 925 Silver Jewellery",
+                "textColor": "#B8D7DB",
+                "textSize": 12,
+                "fontType": [
+                  "NORMAL"
+                ],
+                "fontFamily": "INTER"
+              }
+            ]
+          },
+          "cardMeta": {
+            "cta": {
+              "deepLink": "{deeplink}",
+              "text": {
+                "textList": [
+                  {
+                    "text": "See all",
+                    "textColor": "#BEB4CC",
+                    "textSize": 12,
+                    "fontType": [
+                      "NORMAL"
+                    ],
+                    "fontFamily": "INTER"
+                  }
+                ]
+              }
+            },
+            "cardBackground": {
+              "gradientList": [
+                "#006C7A",
+                "#006C7A",
+                "#006C7A"
+              ],
+              "cornerRadius": 0,
+              "expanded": false
+            },
+            "shouldRunShimmer": false
+          },
+          "hasTranslations": true,
+          "data": {
+            "deeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products?collections=savings_purchase_skus&useJarSavingsFilter=true&utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel",
+            "cardPriorityLevel": "P3",
+            "titleText": null,
+            "products": [
+              {
+                "skuCode": "AU999GC005G",
+                "title": "0.5Gm Gold Coin (999 Purity)",
+                "strikedPrice": null,
+                "price": "Buy with 0.5 g Jar Savings",
+                "discountText": null,
+                "discountTextColor": "#66B3FF",
+                "payableWithSavingsText": "Pay ₹0",
+                "thumbnail": "https://img.myjar.app/NphjSVEkd6vXEjrjWMsXaHbFSwMb_RBQ9g4aSqIa7Q4/rs:fit:0:0/q:60/format:webp/plain/https://shopnek.com/assets_new/images/products/AU999GC005G/AU999GC005G_2_1.avif",
+                "category": "coin",
+                "type": "gold",
+                "vendor": "AUGMONT",
+                "cardBorderGradient": [
+                  "#FFC1AFF0",
+                  "#1A42395A",
+                  "#FFC1AFF0"
+                ],
+                "cardDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/0.5gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel",
+                "ctaText": "View Details",
+                "ctaIcon": "https://img.myjar.app/Um_G88mhZmifmAjmd1cQokJ9kB3Upoah3tlofQIuogs/rs:fit:0:0/q:60/format:webp/plain/https://cdn.myjar.app/Homefeed/Nek/SkuSurfacing/arrow-right.webp",
+                "ctaType": "BUY_NOW",
+                "ctaDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/0.5gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel"
+              },
+              {
+                "skuCode": "AU999GC01G",
+                "title": "1Gm Gold Coin (999 Purity)",
+                "strikedPrice": null,
+                "price": "Buy with 1 g Jar Savings",
+                "discountText": null,
+                "discountTextColor": "#66B3FF",
+                "payableWithSavingsText": "Pay ₹0",
+                "thumbnail": "https://img.myjar.app/2UTeKgwtXLXfi36sur1uZsr-UYL_S_KyDnWu2M1AMsw/rs:fit:0:0/q:60/format:webp/plain/https://shopnek.com/assets_new/images/products/AU999GC01G/AU999GC01G_2_1.avif",
+                "category": "coin",
+                "type": "gold",
+                "vendor": "AUGMONT",
+                "cardBorderGradient": [
+                  "#FFC1AFF0",
+                  "#1A42395A",
+                  "#FFC1AFF0"
+                ],
+                "cardDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/1gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel",
+                "ctaText": "View Details",
+                "ctaIcon": "https://img.myjar.app/Um_G88mhZmifmAjmd1cQokJ9kB3Upoah3tlofQIuogs/rs:fit:0:0/q:60/format:webp/plain/https://cdn.myjar.app/Homefeed/Nek/SkuSurfacing/arrow-right.webp",
+                "ctaType": "BUY_NOW",
+                "ctaDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/1gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel"
+              },
+              {
+                "skuCode": "AU999GC02G",
+                "title": "2Gm Gold Coin (999 Purity)",
+                "strikedPrice": null,
+                "price": "Buy with 2 g Jar Savings",
+                "discountText": null,
+                "discountTextColor": "#66B3FF",
+                "payableWithSavingsText": "Pay ₹0",
+                "thumbnail": "https://img.myjar.app/NphjSVEkd6vXEjrjWMsXaHbFSwMb_RBQ9g4aSqIa7Q4/rs:fit:0:0/q:60/format:webp/plain/https://shopnek.com/assets_new/images/products/AU999GC005G/AU999GC005G_2_1.avif",
+                "category": "coin",
+                "type": "gold",
+                "vendor": "AUGMONT",
+                "cardBorderGradient": [
+                  "#FFC1AFF0",
+                  "#1A42395A",
+                  "#FFC1AFF0"
+                ],
+                "cardDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/2gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel",
+                "ctaText": "View Details",
+                "ctaIcon": "https://img.myjar.app/Um_G88mhZmifmAjmd1cQokJ9kB3Upoah3tlofQIuogs/rs:fit:0:0/q:60/format:webp/plain/https://cdn.myjar.app/Homefeed/Nek/SkuSurfacing/arrow-right.webp",
+                "ctaType": "BUY_NOW",
+                "ctaDeeplink": "dl.myjar.app/vibaWebView/https://cached-staging.shopnek.com/products/2gm-gold-coin-999-purity?utm_source=JarApp&utm_medium=JarHome_NekJewelleryCarousel&utm_campaign=JarHome_NekJewelleryCarousel"
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}
